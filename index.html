@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <title>Admin | Store Management</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <section id="loginScreen" class="login" hidden>
+    <form id="loginForm" class="login-card" novalidate>
+      <h1>Store admin</h1>
+      <div id="loginMsg"></div>
+      <label for="lEmail">Email</label><input id="lEmail" type="email" autocomplete="email" required>
+      <label for="lPass">Password</label><input id="lPass" type="password" autocomplete="current-password" required>
+      <button class="btn pri" style="width:100%;margin-top:14px">Sign in</button>
+    </form>
+  </section>
+
+  <div id="shell" class="shell" hidden>
+    <aside class="side" id="side">
+      <div class="brand" id="brandName">Admin</div>
+      <nav id="nav">
+        <a href="#/dashboard">Dashboard</a><a href="#/deliveries">My deliveries</a><a href="#/orders">Orders</a><a href="#/products">Products</a>
+        <a href="#/categories">Categories</a><a href="#/inventory">Inventory</a><a href="#/customers">Customers</a>
+        <a href="#/reviews">Reviews</a><a href="#/staff">Staff</a><a href="#/settings">Settings</a>
+      </nav>
+      <div class="me"><span id="meName"></span><button class="btn sm ghost" id="mfaBtn">Two-step verification</button><button class="btn sm ghost" id="pwBtn">Change password</button><button class="btn sm ghost" id="logoutBtn">Sign out</button></div>
+    </aside>
+    <div class="content">
+      <div class="mobilebar"><button id="menuBtn" aria-label="Menu">&#9776;</button><strong id="mobTitle">Admin</strong></div>
+      <div id="mfaBanner" class="mfabanner" hidden><span><b>Protect your admin account.</b> Two-step verification is not on yet.</span><button class="btn pri sm" id="mfaBannerBtn">Set up now</button></div>
+      <main id="view" tabindex="-1"></main>
+    </div>
+  </div>
+
+  <dialog id="dlg"></dialog>
+  <div id="toasts" aria-live="polite"></div>
+  <script src="vendor/supabase.js"></script>
+  <script src="config.js"></script>
+  <script src="script.js"></script>
+</body>
+</html>
