@@ -34,7 +34,7 @@ const params = () => { const [path, qs] = (location.hash.slice(1) || '/dashboard
 const setParam = (k, v) => { const { path, p } = params(); v ? p[k] = v : delete p[k]; if (k !== 'page') delete p.page; location.hash = `#${path}?${new URLSearchParams(p)}`; };
 const skeleton = () => '<div class="skel"></div>';
 const empty = t => `<div class="state">${t}</div>`;
-const table = (cols, rows) => rows.length ? `<div class="tablewrap"><table><thead><tr>${cols.map(c => `<th>${c[0]}</th>`).join('')}</tr></thead><tbody>${rows.map(r => `<tr>${cols.map(c => `<td>${c[1](r)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>` : empty('Nothing to show yet.');
+const table = (cols, rows) => rows.length ? `<div class="tablewrap" tabindex="0"><table><thead><tr>${cols.map(c => `<th>${c[0]}</th>`).join('')}</tr></thead><tbody>${rows.map(r => `<tr>${cols.map(c => `<td>${c[1](r)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>` : empty('Nothing to show yet.');
 const pager = (page, total) => { const n = Math.ceil(total / CONFIG.PAGE_SIZE); return n > 1 ? `<div class="foot" style="justify-content:center;align-items:center"><button class="btn sm ghost" data-page="${page - 1}" ${page <= 1 ? 'disabled' : ''}>Previous</button>Page ${page} of ${n}<button class="btn sm ghost" data-page="${page + 1}" ${page >= n ? 'disabled' : ''}>Next</button></div>` : ''; };
 const pill = (t, kind) => `<span class="pill ${kind || ''}">${esc(t)}</span>`;
 const range = page => [(page - 1) * CONFIG.PAGE_SIZE, page * CONFIG.PAGE_SIZE - 1];
@@ -116,14 +116,17 @@ async function openMfaDialog() {
     return;
   }
   for (const x of (f?.all || []).filter(x => x.status === 'unverified')) await db.auth.mfa.unenroll({ factorId: x.id }); // clear abandoned attempts
-  const { data, error } = await db.auth.mfa.enroll({ factorType: 'totp', friendlyName: 'Authenticator' });
+  const { data: { user: acct } } = await db.auth.getUser();
+  // The app shows "<store name> Admin" and the account email, instead of the website address.
+  const { data, error } = await db.auth.mfa.enroll({ factorType: 'totp', issuer: `${S.settings.store_name || 'Store'} Admin`, friendlyName: acct?.email || 'Authenticator' });
   if (error) return toast(error.message, true);
   openDlg(`<h2>Set up two-step verification</h2>
     <ol style="padding-left:18px;margin-bottom:10px"><li>Install an authenticator app, such as Google Authenticator, Microsoft Authenticator or Authy.</li><li>Scan this code, or type the key by hand.</li><li>Enter the 6-digit code the app shows.</li></ol>
-    <div style="text-align:center"><img src="${data.totp.qr_code}" alt="QR code to scan" width="180" height="180"></div>
+    <div style="text-align:center"><img id="mfaQr" alt="QR code to scan" width="180" height="180"></div>
     <p style="word-break:break-all;text-align:center"><small>Key: <b>${esc(data.totp.secret)}</b></small></p><div id="mfaMsg"></div>
     <form id="mfaForm" novalidate><label for="mfaCode2">6-digit code</label><input id="mfaCode2" inputmode="numeric" maxlength="6" autocomplete="one-time-code" required>
     <div class="foot"><button type="button" class="btn ghost" data-close>Cancel</button><button class="btn pri">Turn on</button></div></form>`);
+  $('#mfaQr').src = data.totp.qr_code; // set as a property: the code contains quotes that would break the page if pasted into HTML
   $('#mfaForm').onsubmit = async ev => {
     ev.preventDefault();
     const ch = await db.auth.mfa.challenge({ factorId: data.id }); if (ch.error) return fail('#mfaMsg', ch.error);
@@ -197,7 +200,7 @@ routes.orders = async p => {
   if (p.q) { const t = p.q.replace(/[,()%*]/g, ' ').trim(); q = q.or(`order_number.ilike.%${t}%,ship_name.ilike.%${t}%,ship_email.ilike.%${t}%`); }
   const { data, count, error } = await q.range(...range(page));
   if (error) throw error;
-  view.innerHTML = head('Orders', `<input id="sq" type="search" placeholder="Order no., name or email" value="${esc(p.q || '')}"><select id="fs">${opts(STATUSES, p.status, 'All statuses')}</select><select id="fp">${opts(PAYMENTS, p.pay, 'All payments')}</select>`) +
+  view.innerHTML = head('Orders', `<input id="sq" type="search" placeholder="Order no., name or email" value="${esc(p.q || '')}"><select id="fs" aria-label="Filter by order status">${opts(STATUSES, p.status, 'All statuses')}</select><select id="fp" aria-label="Filter by payment status">${opts(PAYMENTS, p.pay, 'All payments')}</select>`) +
     `<div class="panel">${table([['Order', o => `<b>${esc(o.order_number)}</b>`], ['Customer', o => esc(o.ship_name)], ['Total', o => money(o.total)], ['Status', o => pill(o.status, o.status === 'cancelled' ? 'bad' : o.status === 'delivered' ? 'ok' : 'warn')], ['Payment', o => pill((o.payment_method === 'cod' ? 'COD · ' : '') + o.payment_status, o.payment_status === 'paid' ? 'ok' : '')], ['Rider', o => o.rider_name ? esc(o.rider_name) : (o.status === 'shipped' ? pill('Needs rider', 'warn') : '')], ['Date', o => date(o.created_at)], ['', o => `<button class="btn sm" data-view="${o.id}">View</button>`]], data)}${pager(page, count)}</div>`;
   bindPager();
   $('#sq').onchange = e => setParam('q', e.target.value.trim());
@@ -214,7 +217,7 @@ async function orderDetail(id) {
     <div><b>Delivery</b><br>${esc(o.ship_address)}<br>${esc(o.ship_city)}, ${esc(o.ship_state)}, ${esc(o.ship_country)}${o.delivery_notes ? `<br><i>${esc(o.delivery_notes)}</i>` : ''}</div></div>
     <div class="panel" style="margin-top:12px">${table([['Item', i => esc(i.product_name)], ['SKU', i => esc(i.product_sku)], ['Qty', i => i.quantity], ['Price', i => money(i.unit_price)], ['Line', i => money(i.unit_price * i.quantity)]], o.order_items)}
       <p style="text-align:right;margin-top:8px">Delivery ${money(o.shipping_fee)} · Tax ${money(o.tax_total)} · <b>Total ${money(o.total)}</b></p></div>
-    <div class="grid2"><div><label>Order status</label><select id="oSt">${opts(STATUSES.filter(st => st === o.status || (['pending', 'confirmed', 'cancelled'].includes(st) ? can('orders.accept') : st === 'processing' ? can('orders.pack') : can('orders.ship'))), o.status)}</select></div><div><label>Payment status (${o.payment_method === 'cod' ? 'pay on delivery: set Paid once the cash is collected' : 'Paystack'})</label><select id="oPay" ${can('orders.payments') ? '' : 'disabled'}>${opts(PAYMENTS, o.payment_status)}</select></div></div>
+    <div class="grid2"><div><label for="oSt">Order status</label><select id="oSt">${opts(STATUSES.filter(st => st === o.status || (['pending', 'confirmed', 'cancelled'].includes(st) ? can('orders.accept') : st === 'processing' ? can('orders.pack') : can('orders.ship'))), o.status)}</select></div><div><label for="oPay">Payment status (${o.payment_method === 'cod' ? 'pay on delivery: set Paid once the cash is collected' : 'Paystack'})</label><select id="oPay" ${can('orders.payments') ? '' : 'disabled'}>${opts(PAYMENTS, o.payment_status)}</select></div></div>
     <ul class="hist" style="margin-top:12px">${[...o.order_status_history].sort((a, b) => a.created_at.localeCompare(b.created_at)).map(h => `<li>${date(h.created_at)}: ${esc(h.status)}</li>`).join('')}</ul>
     ${o.rider_name ? `<p style="margin-top:10px"><b>Rider:</b> ${esc(o.rider_name)} ${esc(o.rider_phone || '')}</p>` : ''}
     ${(o.delivery_attempts || []).filter(a => a.outcome === 'failed').map(a => `<div class="msg err">Failed delivery (${date(a.created_at)}): ${esc(a.note)}</div>`).join('')}
@@ -251,7 +254,7 @@ routes.products = async p => {
   const { data, count, error } = await q.range(...range(page));
   if (error) throw error;
   const thumb = r => `<img class="thumb" alt="" src="${esc([...(r.product_images || [])].sort((a, b) => a.sort_order - b.sort_order)[0]?.url || '')}">`;
-  view.innerHTML = head('Products', `<input id="sq" type="search" placeholder="Name or SKU" value="${esc(p.q || '')}"><select id="fc">${opts(S.cats.map(c => [c.id, c.name]), p.cat, 'All categories')}</select><button class="btn pri" data-edit="">Add product</button>`) +
+  view.innerHTML = head('Products', `<input id="sq" type="search" placeholder="Name or SKU" value="${esc(p.q || '')}"><select id="fc" aria-label="Filter by category">${opts(S.cats.map(c => [c.id, c.name]), p.cat, 'All categories')}</select><button class="btn pri" data-edit="">Add product</button>`) +
     `<div class="panel">${table([['', thumb], ['Name', r => `<b>${esc(r.name)}</b><br><small>${esc(r.sku)}</small>`], ['Category', r => esc(r.categories?.name)], ['Price', r => money(r.discount_price ?? r.price) + (r.discount_price ? ` <s>${money(r.price)}</s>` : '')], ['Stock', r => one(r.inventory)?.quantity ?? 0], ['Status', r => r.is_active ? pill('Active', 'ok') : pill('Disabled', 'bad')],
       ['', r => `<div class="act"><button class="btn sm" data-edit="${r.id}">Edit</button><button class="btn sm ghost" data-toggle="${r.id}" data-on="${r.is_active}">${r.is_active ? 'Disable' : 'Enable'}</button><button class="btn sm dng" data-del="${r.id}">Delete</button></div>`]], data)}${pager(page, count)}</div>`;
   bindPager();
@@ -284,7 +287,7 @@ async function productForm(id) {
     ${f('low_stock_threshold', 'Low-stock threshold', inv.low_stock_threshold, 'number', 'min="0" step="1"')}
     <div class="flags">${chk('is_active', 'Active')}${chk('is_featured', 'Featured')}${chk('is_best_seller', 'Best seller')}${chk('is_new_arrival', 'New arrival')}</div>
     <label for="f_specs">Specifications (one per line, "Name: Value")</label><textarea id="f_specs" name="specs" rows="4">${esc(specs.map(s => `${s.spec_key}: ${s.spec_value}`).join('\n'))}</textarea>
-    <label>Images</label><div class="imgs" id="imgList">${imgs.map(i => `<div data-img="${i.id}" data-url="${esc(i.url)}"><img src="${esc(i.url)}" alt=""><button type="button" aria-label="Remove image">×</button></div>`).join('')}</div>
+    <label for="f_files">Images</label><div class="imgs" id="imgList">${imgs.map(i => `<div data-img="${i.id}" data-url="${esc(i.url)}"><img src="${esc(i.url)}" alt=""><button type="button" aria-label="Remove image">×</button></div>`).join('')}</div>
     <input type="file" id="f_files" accept="image/*" multiple>
     <div class="foot"><button type="button" class="btn ghost" data-close>Cancel</button><button class="btn pri" id="pSave">Save product</button></div></form>`);
   $('#imgList').onclick = async e => {
@@ -377,7 +380,7 @@ routes.inventory = async p => {
   const { data, count, error } = await db.from('inventory').select('product_id,quantity,low_stock_threshold,updated_at, products!inner(name,sku,is_active)', { count: 'exact' }).order('quantity').range(...range(page));
   if (error) throw error;
   const stat = r => r.quantity <= 0 ? pill('Out of stock', 'bad') : r.quantity <= r.low_stock_threshold ? pill('Low stock', 'warn') : pill('In stock', 'ok');
-  view.innerHTML = head('Inventory') + `<div class="panel">${table([['Product', r => `<b>${esc(r.products.name)}</b>`], ['SKU', r => esc(r.products.sku)], ['Stock', r => `<input type="number" min="0" step="1" style="width:90px" data-f="quantity" data-id="${r.product_id}" value="${r.quantity}">`], ['Threshold', r => `<input type="number" min="0" step="1" style="width:90px" data-f="low_stock_threshold" data-id="${r.product_id}" value="${r.low_stock_threshold}">`], ['Status', stat], ['Updated', r => date(r.updated_at)]], data)}${pager(page, count)}</div>`;
+  view.innerHTML = head('Inventory') + `<div class="panel">${table([['Product', r => `<b>${esc(r.products.name)}</b>`], ['SKU', r => esc(r.products.sku)], ['Stock', r => `<input type="number" min="0" step="1" style="width:90px" data-f="quantity" data-id="${r.product_id}" value="${r.quantity}" aria-label="Stock for ${esc(r.products.name)}">`], ['Threshold', r => `<input type="number" min="0" step="1" style="width:90px" data-f="low_stock_threshold" data-id="${r.product_id}" value="${r.low_stock_threshold}" aria-label="Low-stock level for ${esc(r.products.name)}">`], ['Status', stat], ['Updated', r => date(r.updated_at)]], data)}${pager(page, count)}</div>`;
   bindPager();
   listen('change', async e => {
     const i = e.target.closest('[data-f]'); if (!i) return;
@@ -395,9 +398,15 @@ routes.customers = async p => {
   const { data, count, error } = await q.range(...range(page));
   if (error) throw error;
   view.innerHTML = head('Customers', `<input id="sq" type="search" placeholder="Name or email" value="${esc(p.q || '')}">`) + `<div class="panel">${table([['Name', c => `<b>${esc(c.full_name)}</b>`], ['Email', c => esc(c.email)], ['Phone', c => esc(c.phone)], ['Joined', c => date(c.created_at)], ['Orders', c => c.order_count], ['Spent', c => money(c.total_spent)], ['Account', c => c.status === 'active' ? pill('Active', 'ok') : pill('Suspended', 'bad')],
-    ['', c => can('customers.manage') ? `<button class="btn sm ghost" data-id="${c.id}" data-s="${c.status}">${c.status === 'active' ? 'Suspend' : 'Reactivate'}</button>` : '']], data)}${pager(page, count)}</div>`;
+    ['', c => (can('customers.manage') ? `<button class="btn sm ghost" data-id="${c.id}" data-s="${c.status}">${c.status === 'active' ? 'Suspend' : 'Reactivate'}</button>` : '') + (isSuper() ? ` <button class="btn sm ghost" data-mfa="${c.id}">Reset 2-step</button>` : '')]], data)}${pager(page, count)}</div>`;
   bindPager(); $('#sq').onchange = e => setParam('q', e.target.value.trim());
   listen('click', async e => {
+    const mfa = e.target.closest('[data-mfa]');
+    if (mfa) {
+      if (!confirm('Reset two-step verification for this customer? Only do this after you have confirmed it is really them.')) return;
+      const { error: err } = await db.rpc('admin_reset_mfa', { p_user: mfa.dataset.mfa });
+      return err ? toast(err.message, true) : toast('Reset. The customer can now sign in with their password.');
+    }
     const b = e.target.closest('[data-s]'); if (!b) return;
     const next = b.dataset.s === 'active' ? 'suspended' : 'active';
     if (next === 'suspended' && !confirm('Suspend this customer? They will not be able to place orders.')) return;
